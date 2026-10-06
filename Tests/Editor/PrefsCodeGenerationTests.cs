@@ -1,0 +1,190 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using NUnit.Framework;
+using UnityEngine;
+
+namespace GirikGarg.PreferencesUtility.Editor.Tests
+{
+    /// <summary>Tests for type resolution, validation and code generation.</summary>
+    public sealed class PrefsCodeGenerationTests
+    {
+        private const string AssetPath = "Assets/Tests/GamePrefs.prefsdef";
+
+        public enum TestDifficulty
+        {
+            Easy,
+            Normal,
+            Hard
+        }
+
+        [Flags]
+        public enum TestFlags
+        {
+            None = 0,
+            A = 1,
+            B = 2
+        }
+
+        public enum TestWideEnum : long
+        {
+            Small = 1,
+            Large = long.MaxValue
+        }
+
+        [Test]
+        public void Resolver_HandlesAliasesGenericsArraysNullablesAndNestedTypes()
+        {
+            Assert.AreEqual(typeof(int), TypeNameResolver.Resolve("int", null).Type);
+            Assert.AreEqual(typeof(List<int>), TypeNameResolver.Resolve("List<int>", null).Type);
+            Assert.AreEqual(typeof(Dictionary<string, Vector3>), TypeNameResolver.Resolve("Dictionary<string, Vector3>", null).Type);
+            Assert.AreEqual(typeof(int[,]), TypeNameResolver.Resolve("int[,]", null).Type);
+            Assert.AreEqual(typeof(float?[]), TypeNameResolver.Resolve("float?[]", null).Type);
+            Assert.AreEqual(typeof(TestDifficulty),
+                TypeNameResolver.Resolve("GirikGarg.PreferencesUtility.Editor.Tests.PrefsCodeGenerationTests.TestDifficulty", null).Type);
+            Assert.AreEqual(typeof(TestDifficulty),
+                TypeNameResolver.Resolve("PrefsCodeGenerationTests.TestDifficulty", "GirikGarg.PreferencesUtility.Editor.Tests").Type);
+            Assert.IsFalse(TypeNameResolver.Resolve("DoesNotExist.Nope", null).Success);
+            Assert.IsFalse(TypeNameResolver.Resolve("List<int", null).Success);
+        }
+
+        [Test]
+        public void TypeNames_AreFullyQualified()
+        {
+            Assert.AreEqual("global::System.Collections.Generic.Dictionary<string, global::UnityEngine.Vector3>",
+                CSharpTypeName.GetQualified(typeof(Dictionary<string, Vector3>)));
+            Assert.AreEqual("global::GirikGarg.PreferencesUtility.Editor.Tests.PrefsCodeGenerationTests.TestDifficulty",
+                CSharpTypeName.GetQualified(typeof(TestDifficulty)));
+            Assert.AreEqual("int?[]", CSharpTypeName.GetReadable(typeof(int?[])));
+        }
+
+        [Test]
+        public void Syntax_ValidatesAndSanitizesIdentifiers()
+        {
+            Assert.IsTrue(CSharpSyntax.IsValidIdentifier("MasterVolume"));
+            Assert.IsFalse(CSharpSyntax.IsValidIdentifier("class"));
+            Assert.IsFalse(CSharpSyntax.IsValidIdentifier("1st"));
+            Assert.AreEqual("GamePrefs", CSharpSyntax.ToIdentifier("game prefs"));
+            Assert.AreEqual("_2DSettings", CSharpSyntax.ToIdentifier("2D Settings"));
+            Assert.AreEqual("\"a\\\"b\\n\"", CSharpSyntax.StringLiteral("a\"b\n"));
+        }
+
+        [Test]
+        public void Analyzer_ReportsDuplicateReservedAndInvalidEntries()
+        {
+            PrefsDefinition definition = new PrefsDefinition();
+            definition.entries.Add(new PrefsEntry { name = "Volume", type = "float", defaultValue = "1" });
+            definition.entries.Add(new PrefsEntry { name = "Volume", type = "float", defaultValue = "1" });
+            definition.entries.Add(new PrefsEntry { name = "Keys", type = "int", defaultValue = "0" });
+            definition.entries.Add(new PrefsEntry { name = "Bad", type = "int", defaultValue = "abc" });
+            definition.entries.Add(new PrefsEntry { name = "NotEnum", type = PrefsValueHandlers.EnumId, typeName = "int" });
+
+            PrefsDefinitionAnalysis analysis = PrefsDefinitionAnalyzer.Analyze(definition, AssetPath, false);
+
+            Assert.IsTrue(analysis.HasErrors);
+            Assert.IsTrue(analysis.Issues.Any(issue => issue.EntryIndex == 1 && issue.Message.Contains("already used")));
+            Assert.IsTrue(analysis.Issues.Any(issue => issue.EntryIndex == 2 && issue.Message.Contains("reserved")));
+            Assert.IsTrue(analysis.Issues.Any(issue => issue.EntryIndex == 3 && issue.Message.Contains("Default value")));
+            Assert.IsTrue(analysis.Issues.Any(issue => issue.EntryIndex == 4 && issue.Message.Contains("not an enum")));
+        }
+
+        [Test]
+        public void Generator_EmitsDirectPlayerPrefsCalls()
+        {
+            PrefsDefinition definition = CreateFullDefinition(PrefsStorage.PlayerPrefs);
+            PrefsDefinitionAnalysis analysis = PrefsDefinitionAnalyzer.Analyze(definition, AssetPath, false);
+            Assert.IsFalse(analysis.HasErrors, string.Join("\n", analysis.Issues.Select(issue => issue.Message)));
+
+            string code = PrefsCodeGenerator.Generate(definition, analysis, AssetPath);
+
+            StringAssert.Contains("<auto-generated>", code);
+            StringAssert.Contains("namespace MyGame", code);
+            StringAssert.Contains("public static partial class GamePrefs", code);
+            StringAssert.Contains("public const string IsTutorialDone = \"Game.IsTutorialDone\";", code);
+            StringAssert.Contains("get => global::UnityEngine.PlayerPrefs.GetInt(Keys.IsTutorialDone, Defaults.IsTutorialDone ? 1 : 0) != 0;", code);
+            StringAssert.Contains("set => global::UnityEngine.PlayerPrefs.SetFloat(Keys.MasterVolume, value);", code);
+            StringAssert.Contains("public const float MasterVolume = 0.8f;", code);
+            StringAssert.Contains(".TestDifficulty.Hard;", code);
+            StringAssert.Contains(".TestFlags.A | global::", code);
+            StringAssert.Contains("PrefsConverter.ToInt64(global::UnityEngine.PlayerPrefs.GetString(Keys.WideEnum", code);
+            StringAssert.Contains("public static readonly global::UnityEngine.Vector3 SpawnPoint = new global::UnityEngine.Vector3(1f, 2f, 3f);", code);
+            StringAssert.Contains("PrefsJson.Read<global::System.Collections.Generic.List<int>>", code);
+            StringAssert.Contains("public const string Unlocked = \"[1,2,3]\";", code);
+            StringAssert.Contains("public static void Save() => global::UnityEngine.PlayerPrefs.Save();", code);
+            Assert.IsFalse(code.Contains("\r"), "Generated code must use LF line endings.");
+            Assert.IsFalse(code.Contains("#if UNITY_EDITOR"));
+        }
+
+        [Test]
+        public void Generator_WrapsEditorPrefsInEditorDefine()
+        {
+            PrefsDefinition definition = CreateFullDefinition(PrefsStorage.EditorPrefs);
+            PrefsDefinitionAnalysis analysis = PrefsDefinitionAnalyzer.Analyze(definition, AssetPath, false);
+            string code = PrefsCodeGenerator.Generate(definition, analysis, AssetPath);
+
+            StringAssert.Contains("#if UNITY_EDITOR", code);
+            StringAssert.Contains("global::UnityEditor.EditorPrefs.GetBool(Keys.IsTutorialDone, Defaults.IsTutorialDone)", code);
+            Assert.IsFalse(code.Contains("void Save()"));
+        }
+
+        [Test]
+        public void Generator_IsDeterministic()
+        {
+            PrefsDefinition definition = CreateFullDefinition(PrefsStorage.PlayerPrefs);
+            string first = PrefsCodeGenerator.Generate(definition, PrefsDefinitionAnalyzer.Analyze(definition, AssetPath, false), AssetPath);
+            string second = PrefsCodeGenerator.Generate(definition, PrefsDefinitionAnalyzer.Analyze(definition, AssetPath, false), AssetPath);
+            Assert.AreEqual(first, second);
+        }
+
+        [Test]
+        public void Serializer_RoundTripsDefinition()
+        {
+            PrefsDefinition definition = CreateFullDefinition(PrefsStorage.EditorPrefs);
+            string json = PrefsDefinitionSerializer.ToJson(definition);
+            PrefsDefinition parsed = PrefsDefinitionSerializer.FromJson(json);
+
+            Assert.AreEqual(json, PrefsDefinitionSerializer.ToJson(parsed));
+            StringAssert.Contains("\"storage\": \"EditorPrefs\"", json);
+            Assert.IsFalse(json.Contains("\r"));
+        }
+
+        [Test]
+        public void AllBuiltInHandlers_RoundTripTheirZeroValue()
+        {
+            foreach (PrefsValueHandler handler in PrefsValueHandlers.All.Where(handler => !handler.UsesTypeName))
+            {
+                object zero = handler.GetZeroValue(null);
+                string text = handler.FormatText(zero, null);
+                Assert.IsTrue(handler.TryParseText(text, null, out object parsed, out string error), $"{handler.Id}: {error}");
+                Assert.AreEqual(zero, parsed, handler.Id);
+                Assert.IsNotEmpty(handler.EmitDefault(zero, null, handler.GetTypeExpression(null, null), text), handler.Id);
+            }
+        }
+
+        private static PrefsDefinition CreateFullDefinition(PrefsStorage storage)
+        {
+            const string testsPrefix = "GirikGarg.PreferencesUtility.Editor.Tests.PrefsCodeGenerationTests.";
+            return new PrefsDefinition
+            {
+                storage = storage,
+                namespaceName = "MyGame",
+                keyPrefix = "Game.",
+                entries = new List<PrefsEntry>
+                {
+                    new PrefsEntry { name = "IsTutorialDone", type = "bool", defaultValue = "false", summary = "Tutorial <done> flag." },
+                    new PrefsEntry { name = "MasterVolume", type = "float", defaultValue = "0.8" },
+                    new PrefsEntry { name = "PlayerName", type = "string", defaultValue = "Hero \"One\"" },
+                    new PrefsEntry { name = "Coins", type = "long", defaultValue = "9000000000" },
+                    new PrefsEntry { name = "Seed", type = "uint", defaultValue = "4000000000" },
+                    new PrefsEntry { name = "LastLogin", type = "DateTime", defaultValue = "2024-01-01T00:00:00.0000000Z" },
+                    new PrefsEntry { name = "SpawnPoint", type = "Vector3", defaultValue = "1,2,3" },
+                    new PrefsEntry { name = "Tint", type = "Color32", defaultValue = "255,128,0,255" },
+                    new PrefsEntry { name = "Difficulty", type = PrefsValueHandlers.EnumId, typeName = testsPrefix + "TestDifficulty", defaultValue = "Hard" },
+                    new PrefsEntry { name = "Options", type = PrefsValueHandlers.EnumId, typeName = testsPrefix + "TestFlags", defaultValue = "A, B" },
+                    new PrefsEntry { name = "WideEnum", type = PrefsValueHandlers.EnumId, typeName = testsPrefix + "TestWideEnum", defaultValue = "Large" },
+                    new PrefsEntry { name = "Unlocked", type = PrefsValueHandlers.JsonId, typeName = "List<int>", defaultValue = "[1, 2, 3]" }
+                }
+            };
+        }
+    }
+}

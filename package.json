@@ -1,0 +1,25 @@
+{
+  "name": "com.girikgarg.preferencesutility",
+  "displayName": "Preferences Utility",
+  "version": "1.0.0",
+  "unity": "6000.0",
+  "description": "Visual editor and C# code generator for PlayerPrefs and EditorPrefs. Define preferences in version-controlled .prefsdef assets, set defaults in the Editor, and get strongly typed, zero-reflection accessors for every built-in C# and Unity type plus any custom type (serialized with Newtonsoft Json). Includes a live viewer for all PlayerPrefs and EditorPrefs.",
+  "keywords": [
+    "playerprefs",
+    "editorprefs",
+    "preferences",
+    "settings",
+    "save",
+    "codegen"
+  ],
+  "dependencies": {
+    "com.unity.nuget.newtonsoft-json": "3.2.1"
+  },
+  "author": {
+    "name": "Girik Garg"
+  },
+  "hideInEditor": false,
+  "documentationUrl": "https://github.com/girikgarg132/UnityPreferencesUtility#readme",
+  "changelogUrl": "https://github.com/girikgarg132/UnityPreferencesUtility/blob/main/CHANGELOG.md",
+  "licensesUrl": "https://github.com/girikgarg132/UnityPreferencesUtility/blob/main/LICENSE"
+}
