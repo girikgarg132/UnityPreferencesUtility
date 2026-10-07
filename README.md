@@ -43,7 +43,9 @@ GamePrefs.CareerData = careerData;           // any class, via Newtonsoft Json
 
 ## Installation
 
-### Package Manager (Git URL)
+There are two ways to install the package. With either one, Newtonsoft Json is installed automatically as a dependency.
+
+### Option 1: Git URL
 
 In **Window > Package Manager**, choose **+ > Install package from git URL** and enter:
 
@@ -51,11 +53,14 @@ In **Window > Package Manager**, choose **+ > Install package from git URL** and
 https://github.com/girikgarg132/UnityPreferencesUtility.git
 ```
 
-Append a tag to pin a version, for example `https://github.com/girikgarg132/UnityPreferencesUtility.git#v1.0.0`. Git must be installed on your machine. Newtonsoft Json is installed automatically as a dependency.
+Append a tag to pin a version, for example `https://github.com/girikgarg132/UnityPreferencesUtility.git#v1.0.0`. Git must be installed on your machine.
 
-### Embedded package
+### Option 2: Tarball (.tgz)
 
-Download the `.tgz` from the repository's Releases page, then use **Assets > Import Package > Custom Package...**.
+1. Download `com.girikgarg.preferencesutility-<version>.tgz` from the [Releases page](https://github.com/girikgarg132/UnityPreferencesUtility/releases).
+2. In **Window > Package Manager**, choose **+ > Install package from tarball** and select the downloaded file.
+
+Unity stores the tarball's path in `Packages/manifest.json`. To share the installation through version control, keep the `.tgz` inside your project, for example in a `Packages` subfolder, so the path resolves on every machine.
 
 ## Quick start
 
